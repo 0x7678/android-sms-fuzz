@@ -1,0 +1,154 @@
+diff --git a/libril/ril.cpp b/libril/ril.cpp
+index 8ec9bba..7921b55 100644
+--- a/libril/ril.cpp
++++ b/libril/ril.cpp
+@@ -2246,133 +2246,37 @@ static void freeDebugCallbackArgs(int number, char **args) {
+ }
+ 
+ static void debugCallback (int fd, short flags, void *param) {
+-    int acceptFD, option;
++    int acceptFD;
++    int length;
++    char message[4096] = {0};
++    int bytesReceived;
++
+     struct sockaddr_un peeraddr;
+     socklen_t socklen = sizeof (peeraddr);
+-    int data;
+-    unsigned int qxdm_data[6];
+-    const char *deactData[1] = {"1"};
+-    char *actData[1];
+-    RIL_Dial dialData;
+-    int hangupData[1] = {1};
+-    int number;
+-    char **args;
+ 
+-    acceptFD = accept (fd,  (sockaddr *) &peeraddr, &socklen);
++    acceptFD = accept(s_fdDebug, (sockaddr *) &peeraddr, &socklen);
+ 
+     if (acceptFD < 0) {
+-        LOGE ("error accepting on debug port: %d\n", errno);
++        LOGE("Error on accept() errno:%d", errno);
++        /* start listening for new connections again */
++        rilEventAddWakeup(&s_debug_event);
+         return;
+     }
+ 
+-    if (recv(acceptFD, &number, sizeof(int), 0) != sizeof(int)) {
+-        LOGE ("error reading on socket: number of Args: \n");
++    if (recv(acceptFD, &length, sizeof(int), 0) != sizeof(int)) {
++        LOGE ("error getting length of message");
+         return;
+     }
+-    args = (char **) malloc(sizeof(char*) * number);
+ 
+-    for (int i = 0; i < number; i++) {
+-        int len;
+-        if (recv(acceptFD, &len, sizeof(int), 0) != sizeof(int)) {
+-            LOGE ("error reading on socket: Len of Args: \n");
+-            freeDebugCallbackArgs(i, args);
+-            return;
+-        }
+-        // +1 for null-term
+-        args[i] = (char *) malloc((sizeof(char) * len) + 1);
+-        if (recv(acceptFD, args[i], sizeof(char) * len, 0)
+-            != (int)sizeof(char) * len) {
+-            LOGE ("error reading on socket: Args[%d] \n", i);
+-            freeDebugCallbackArgs(i, args);
+-            return;
+-        }
+-        char * buf = args[i];
+-        buf[len] = 0;
+-    }
++    LOGI("your message is %d bytes long.", length);
++    bytesReceived = recv(acceptFD, &message, length, 0);
++    LOGI("received %d bytes.", bytesReceived);
+ 
+-    switch (atoi(args[0])) {
+-        case 0:
+-            LOGI ("Connection on debug port: issuing reset.");
+-            issueLocalRequest(RIL_REQUEST_RESET_RADIO, NULL, 0);
+-            break;
+-        case 1:
+-            LOGI ("Connection on debug port: issuing radio power off.");
+-            data = 0;
+-            issueLocalRequest(RIL_REQUEST_RADIO_POWER, &data, sizeof(int));
+-            // Close the socket
+-            close(s_fdCommand);
+-            s_fdCommand = -1;
+-            break;
+-        case 2:
+-            LOGI ("Debug port: issuing unsolicited network change.");
+-            RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_NETWORK_STATE_CHANGED,
+-                                      NULL, 0);
+-            break;
+-        case 3:
+-            LOGI ("Debug port: QXDM log enable.");
+-            qxdm_data[0] = 65536;
+-            qxdm_data[1] = 16;
+-            qxdm_data[2] = 1;
+-            qxdm_data[3] = 32;
+-            qxdm_data[4] = 0;
+-            qxdm_data[4] = 8;
+-            issueLocalRequest(RIL_REQUEST_OEM_HOOK_RAW, qxdm_data,
+-                              6 * sizeof(int));
+-            break;
+-        case 4:
+-            LOGI ("Debug port: QXDM log disable.");
+-            qxdm_data[0] = 65536;
+-            qxdm_data[1] = 16;
+-            qxdm_data[2] = 0;
+-            qxdm_data[3] = 32;
+-            qxdm_data[4] = 0;
+-            qxdm_data[4] = 8;
+-            issueLocalRequest(RIL_REQUEST_OEM_HOOK_RAW, qxdm_data,
+-                              6 * sizeof(int));
+-            break;
+-        case 5:
+-            LOGI("Debug port: Radio On");
+-            data = 1;
+-            issueLocalRequest(RIL_REQUEST_RADIO_POWER, &data, sizeof(int));
+-            sleep(2);
+-            // Set network selection automatic.
+-            issueLocalRequest(RIL_REQUEST_SET_NETWORK_SELECTION_AUTOMATIC, NULL, 0);
+-            break;
+-        case 6:
+-            LOGI("Debug port: Setup Data Call, Apn :%s\n", args[1]);
+-            actData[0] = args[1];
+-            issueLocalRequest(RIL_REQUEST_SETUP_DATA_CALL, &actData,
+-                              sizeof(actData));
+-            break;
+-        case 7:
+-            LOGI("Debug port: Deactivate Data Call");
+-            issueLocalRequest(RIL_REQUEST_DEACTIVATE_DATA_CALL, &deactData,
+-                              sizeof(deactData));
+-            break;
+-        case 8:
+-            LOGI("Debug port: Dial Call");
+-            dialData.clir = 0;
+-            dialData.address = args[1];
+-            issueLocalRequest(RIL_REQUEST_DIAL, &dialData, sizeof(dialData));
+-            break;
+-        case 9:
+-            LOGI("Debug port: Answer Call");
+-            issueLocalRequest(RIL_REQUEST_ANSWER, NULL, 0);
+-            break;
+-        case 10:
+-            LOGI("Debug port: End Call");
+-            issueLocalRequest(RIL_REQUEST_HANGUP, &hangupData,
+-                              sizeof(hangupData));
+-            break;
+-        default:
+-            LOGE ("Invalid request");
+-            break;
+-    }
+-    freeDebugCallbackArgs(number, args);
++    RIL_onUnsolicitedResponse(RIL_UNSOL_RESPONSE_NEW_SMS, (void*)&message, length);
+     close(acceptFD);
++    LOGI("message received.");
+ }
+ 
+-
+ static void userTimerCallback (int fd, short flags, void *param) {
+     UserCallbackInfo *p_info;
+ 
